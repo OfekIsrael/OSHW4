@@ -1,6 +1,8 @@
 #include <cstddef>
 #include <unistd.h>
 #include <limits>
+#include <cstring>
+#include <iostream>
 
 struct MallocMataData {
     size_t size;
@@ -19,7 +21,6 @@ void* smalloc(size_t size) {
     while(current != nullptr) {
         if(current->is_free && current->size >= size) {
             current->is_free = false;
-            current->size = size;
             return (char*)current + sizeof(MallocMataData);
         }
         current = current->next;
@@ -47,7 +48,7 @@ void* scalloc(size_t num, size_t size) {
 
     if (num == 0 || size == 0) return nullptr;
 
-    if (num > SIZE_MAX / size) return nullptr;
+    if (num > __SIZE_MAX__ / size) return nullptr;
 
     if (num * size > 100000000) return nullptr;
 
@@ -94,9 +95,7 @@ void* scalloc(size_t num, size_t size) {
     last = m;
 
     auto* data = (char*)m + sizeof(MallocMataData);
-    for(size_t i = 0; i < num * size; i++) {
-        data[i] = 0;
-    }
+    std::memset(data, 0, num * size);
     return data;
 }
 
@@ -127,11 +126,8 @@ void* srealloc(void* oldp, size_t size) {
             current->is_free = false;
 
             auto* data = (char*)current + sizeof(MallocMataData);
-
             size_t copy_size = (old_m->size < size) ? old_m->size : size;
-            for(size_t i = 0; i < copy_size; i++) {
-                data[i] = old_data[i];
-            }
+            std::memmove(data, old_data, copy_size);
 
             old_m->is_free = true;
 
@@ -160,9 +156,7 @@ void* srealloc(void* oldp, size_t size) {
 
     auto* data = (char*)m + sizeof(MallocMataData);
     size_t copy_size = (old_m->size < size) ? old_m->size : size;
-    for(size_t i = 0; i < copy_size; i++) {
-        data[i] = old_data[i];
-    }
+    std::memmove(data, old_data, copy_size);
     old_m->is_free = true;
 
     return data;
@@ -231,4 +225,3 @@ size_t _num_meta_data_bytes() {
 size_t _size_meta_data() {
     return sizeof(MallocMataData);
 }
-
