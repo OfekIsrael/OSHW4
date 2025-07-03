@@ -1,6 +1,6 @@
 #include <cstddef>
 #include <unistd.h>
-#include <limits>
+#include <climits>
 
 struct MallocMataData {
     size_t size;
@@ -19,7 +19,7 @@ void* smalloc(size_t size) {
         if(current->size >= size) break;
     }
     if(current != nullptr) {
-        
+
     }
 }
 
@@ -141,6 +141,21 @@ void* srealloc(void* oldp, size_t size) {
 
 }
 
+size_t _num_free_blocks() {
+
+    size_t count = 0;
+    MallocMataData* current = head;
+
+    while(current != nullptr) {
+        if(current->is_free) {
+            count++;
+        }
+        current = current->next;
+    }
+
+    return count;
+}
+
 size_t _num_free_bytes() {
 
     size_t count = 0;
@@ -150,6 +165,19 @@ size_t _num_free_bytes() {
         if(current->is_free) {
             count += current->size;
         }
+        current = current->next;
+    }
+
+    return count;
+}
+
+size_t _num_allocated_blocks() {
+
+    size_t count = 0;
+    MallocMataData* current = head;
+
+    while(current != nullptr) {
+        count++;
         current = current->next;
     }
 
@@ -166,6 +194,10 @@ size_t _num_allocated_bytes() {
     }
 
     return count;
+}
+
+size_t _num_meta_data_bytes() {
+    return _num_allocated_blocks() * sizeof(MallocMataData);
 }
 
 size_t _size_meta_data() {
