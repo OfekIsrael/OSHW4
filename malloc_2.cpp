@@ -140,3 +140,34 @@ void* srealloc(void* oldp, size_t size) {
     return data;
 
 }
+
+size_t _num_free_bytes() {
+
+    size_t count = 0;
+    MallocMataData* current = head;
+
+    while(current != nullptr) {
+        if(current->is_free) {
+            count += current->size;
+        }
+        current = current->next;
+    }
+
+    return count;
+}
+
+size_t _num_allocated_bytes() {
+    size_t count = 0;
+    MallocMataData* current = head;
+
+    while(current != nullptr) {
+        count += current->size;
+        current = current->next;
+    }
+
+    return count;
+}
+
+size_t _size_meta_data() {
+    return sizeof(MallocMataData);
+}
