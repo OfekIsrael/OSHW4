@@ -13,14 +13,34 @@ static MallocMataData* head = nullptr;
 static MallocMataData* last = nullptr;
 
 void* smalloc(size_t size) {
+    if (size == 0 || size > 100000000) return nullptr;
+
     MallocMataData* current = head;
     while(current != nullptr) {
-        current_ptr += (void*) current->size;
-        if(current->size >= size) break;
+        if(current->is_free && current->size >= size) {
+            current->is_free = false;
+            current->size = size;
+            return (char*)current + sizeof(MallocMataData);
+        }
+        current = current->next;
     }
-    if(current != nullptr) {
-        
+    void* value = sbrk(size + sizeof(MallocMataData));
+    if(value == (void *) -1) return nullptr;
+
+    MallocMataData* m = (MallocMataData*) value;
+    m->size = size;
+    m->is_free = false;
+    m->next = nullptr;
+    m->prev = last;
+
+    if (!head) {
+        head = m;
+    } else {
+        last->next = m;
     }
+    last = m;
+
+    return (char*)value + sizeof(MallocMataData);
 }
 
 void* scalloc(size_t num, size_t size) {
@@ -79,6 +99,14 @@ void* scalloc(size_t num, size_t size) {
     }
     return data;
 }
+
+
+void sfree(void* p) {
+    if (p == nullptr) return;
+    MallocMataData* m = (MallocMataData*) ((char*)p - sizeof(MallocMataData));
+    m->is_free = true;
+}
+
 
 void* srealloc(void* oldp, size_t size) {
     MallocMataData* m = (MallocMataData*) (oldp - sizeof(MallocMataData));
