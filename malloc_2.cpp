@@ -81,8 +81,13 @@ void* scalloc(size_t num, size_t size) {
 }
 
 void* srealloc(void* oldp, size_t size) {
-    MallocMataData* m = (MallocMataData*) (oldp - sizeof(MallocMataData));
-    if(size <= m->size) return oldp;
+
+    if(size == 0 || size > 100000000) return nullptr;
+
+    if(!oldp) return nullptr;
+
+    MallocMataData* old_m = (MallocMataData*) ((char*)oldp - sizeof(MallocMataData));
+    if(size <= old_m->size) return oldp;
 
     MallocMataData* current = head;
     auto* old_data = (char*)oldp;
@@ -91,11 +96,16 @@ void* srealloc(void* oldp, size_t size) {
 
         if(current->is_free && current->size >= size) {
 
+            current->is_free = false;
+
             auto* data = (char*)current + sizeof(MallocMataData);
 
-            for(size_t i = 0; i < m->size; i++) {
+            size_t copy_size = (old_m->size < size) ? old_m->size : size;
+            for(size_t i = 0; i < copy_size; i++) {
                 data[i] = old_data[i];
             }
+
+            old_m->is_free = true;
 
             return data;
         }
@@ -104,11 +114,11 @@ void* srealloc(void* oldp, size_t size) {
 
     }
 
-    void* value = sbrk(num * size + sizeof(MallocMataData));
+    void* value = sbrk(size + sizeof(MallocMataData));
     if(value == (void *) -1) return nullptr;
 
     MallocMataData* m = (MallocMataData*) value;
-    m->size = num * size;
+    m->size = size;
     m->is_free = false;
     m->next = nullptr;
     m->prev = last;
@@ -121,9 +131,12 @@ void* srealloc(void* oldp, size_t size) {
     last = m;
 
     auto* data = (char*)m + sizeof(MallocMataData);
-    for(size_t i = 0; i < m->size; i++) {
+    size_t copy_size = (old_m->size < size) ? old_m->size : size;
+    for(size_t i = 0; i < copy_size; i++) {
         data[i] = old_data[i];
     }
+    old_m->is_free = true;
+
     return data;
 
 }
