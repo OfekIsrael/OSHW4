@@ -25,7 +25,7 @@ size_t _get_block_size(unsigned int degree) {
 }
 
 
-void removeBlockFromArray(MallocMetaData* block) {
+void _remove_block_from_arr(MallocMetaData* block) {
     if (block->next) {
         if (!block->prev) {
             data_arr[block->degree] = block->next;
@@ -40,7 +40,7 @@ void removeBlockFromArray(MallocMetaData* block) {
 }
 
 
-void addBlockToArray(MallocMetaData* block) {
+void _add_block_to_arr(MallocMetaData* block) {
     MallocMetaData* temp = data_arr[block->degree];
     if (!temp) data_arr[block->degree] = block;
     while (temp) {
@@ -70,7 +70,7 @@ void* _get_buddy(MallocMetaData* block) {
 }
 
 
-bool isBothFree(MallocMetaData* block) {
+bool _is_both_free(MallocMetaData* block) {
     if (!block->is_free) return false;
     MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
     return buddy->degree == block->degree && buddy->is_free;
@@ -78,13 +78,16 @@ bool isBothFree(MallocMetaData* block) {
 
 
 void uniteFreeBuddies(MallocMetaData* block) {
+    /*
+     * iteratively freeing buddies if it can until we get to the maximal deg.
+     */
     if (block->degree == MAX_DEG) return;
-    while (block->degree <= MAX_DEG && isBothFree(block)) {
+    while (block->degree <= MAX_DEG && _is_both_free(block)) {
         MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
-        removeBlockFromArray(buddy);
+        _remove_block_from_arr(buddy);
         block->degree++;
     }
-    addBlockToArray(block);
+    _add_block_to_arr(block);
 }
 
 
@@ -96,13 +99,13 @@ void splitBuddies(void* block) {
  * 3) put the buddy at list (i-1) in the appropriate place.
  */
     MallocMetaData* current = (MallocMetaData*)block;
-    removeBlockFromArray(current);
+    _remove_block_from_arr(current);
     current->degree--;
     size_t buddyBlockSize = _get_block_size(current->degree);
     MallocMetaData* buddy = (MallocMetaData*) ((char*)block + buddyBlockSize);
     buddy->is_free = true;
     buddy->degree = current->degree;
-    addBlockToArray(buddy);
+    _add_block_to_arr(buddy);
 }
 
 
