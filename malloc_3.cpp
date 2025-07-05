@@ -94,6 +94,7 @@ void uniteFreeBuddies(MallocMetaData* block) {
     if (block->degree == MAX_DEG) return;
     while (block->degree < MAX_DEG && _is_both_free(block)) {
         MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
+        buddy->is_free = false;
         _remove_block_from_arr(buddy);
         block->degree++;
     }
