@@ -3,63 +3,77 @@
 #include <limits>
 #include <cstring>
 #include <iostream>
+#include <sys/mman.h>
 
 #define MAX_DEG 10
 #define MIN_BLOCK_SIZE 128
 #define MIN_BLOCK_NUM 32
 
-
 struct MallocMetaData {
-    size_t size;
     unsigned int degree;
     bool is_free;
     MallocMetaData* next;
     MallocMetaData* prev;
+    bool is_mmap;
 };
 
 static MallocMetaData* data_arr[MAX_DEG + 1];
-
+static bool is_init = false;
 
 size_t _get_block_size(unsigned int degree) {
     return MIN_BLOCK_SIZE << degree;  // 128 * 2^degree
 }
 
-
 void _remove_block_from_arr(MallocMetaData* block) {
-    if (block->next) {
-        if (!block->prev) {
-            data_arr[block->degree] = block->next;
-        }
-        block->next->prev = block->prev;
-    }
+    if(!block) return;
     if (block->prev) {
         block->prev->next = block->next;
+    } else {
+        data_arr[block->degree] = block->next;
+    }
+
+    if (block->next) {
+        block->next->prev = block->prev;
     }
     block->next = nullptr;
     block->prev = nullptr;
 }
 
-
 void _add_block_to_arr(MallocMetaData* block) {
+    // Initialize block pointers first
+    block->next = nullptr;
+    block->prev = nullptr;
+    block->is_free = true;
+
+    // If list is empty, make this the head
+    if (!data_arr[block->degree]) {
+        data_arr[block->degree] = block;
+        return;  // ← THIS RETURN WAS MISSING!
+    }
+
     MallocMetaData* temp = data_arr[block->degree];
-    if (!temp) data_arr[block->degree] = block;
-    while (temp) {
-        if (temp > block) {
-            block->next = temp;
-            block->prev = temp->prev;
-            if (temp->prev) temp->prev->next = block;
-            temp->prev = block;
-            break;
-        }
-        if (!temp->next){
-            block->next = nullptr;
-            block->prev = temp;
-            temp->next = block;
-        }
+
+    // Insert at beginning if needed
+    if (temp > block) {
+        block->next = temp;
+        temp->prev = block;
+        data_arr[block->degree] = block;
+        return;
+    }
+
+    // Find correct position
+    while (temp->next && temp->next < block) {
         temp = temp->next;
     }
-}
 
+    // Insert after temp
+    block->next = temp->next;
+    if (temp->next) {
+        temp->next->prev = block;
+    }
+    block->prev = temp;
+    temp->next = block;
+}
 
 void* _get_buddy(MallocMetaData* block) {
     char* blockAddr = (char*)block;
@@ -69,27 +83,22 @@ void* _get_buddy(MallocMetaData* block) {
     return (void*)buddyAddr;
 }
 
-
 bool _is_both_free(MallocMetaData* block) {
     if (!block->is_free) return false;
     MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
     return buddy->degree == block->degree && buddy->is_free;
 }
 
-
 void uniteFreeBuddies(MallocMetaData* block) {
-    /*
-     * iteratively freeing buddies if it can until we get to the maximal deg.
-     */
+
     if (block->degree == MAX_DEG) return;
-    while (block->degree <= MAX_DEG && _is_both_free(block)) {
+    while (block->degree < MAX_DEG && _is_both_free(block)) {
         MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
         _remove_block_from_arr(buddy);
         block->degree++;
     }
     _add_block_to_arr(block);
 }
-
 
 void splitBuddies(void* block) {
 /*
@@ -105,6 +114,9 @@ void splitBuddies(void* block) {
     MallocMetaData* buddy = (MallocMetaData*) ((char*)block + buddyBlockSize);
     buddy->is_free = true;
     buddy->degree = current->degree;
+    buddy->next = nullptr;
+    buddy->prev = nullptr;
+    buddy->is_mmap = current->is_mmap;
     _add_block_to_arr(buddy);
 }
 
@@ -121,7 +133,7 @@ void* allocateFirstTime() {
         return nullptr;
     }
     ptr += offset;
-    auto* current = (MallocMetaData*)ptr;
+    MallocMetaData* current = (MallocMetaData*)ptr;
     data_arr[MAX_DEG] = current;
     
     for (int i = 0; i < MIN_BLOCK_NUM; i++) {
@@ -129,42 +141,69 @@ void* allocateFirstTime() {
         current->is_free = true;
         current->prev = (i == 0) ? nullptr : (MallocMetaData*)((char*)current - max_block_size);
         current->next = (i == MIN_BLOCK_NUM-1) ? nullptr : (MallocMetaData*)((char*)current + max_block_size);
+        current->is_mmap = false;
         current = current->next;
     }
     return ptr;
 }
 
-
 void* smalloc(size_t size) {
     if (size == 0 || size > 100000000) return nullptr;
 
-    MallocMetaData* current = head;
-    while(current != nullptr) {
-        if(current->is_free && current->size >= size) {
-            current->is_free = false;
-            return (char*)current + sizeof(MallocMetaData);
+    if(!is_init) {
+        allocateFirstTime();
+        is_init = true;
+    }
+
+    int d = 0;
+    while(_get_block_size(d) < size + sizeof(MallocMetaData)) {
+        d++;
+    }
+
+    int D = d;
+    while(D <= MAX_DEG && data_arr[D] == nullptr) {
+        D++;
+    }
+
+    if (D > MAX_DEG) {
+        size_t block_size = _get_block_size(MAX_DEG);
+        void* p = mmap(nullptr, block_size,
+                       PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS,
+                       -1, 0);
+        if (p == MAP_FAILED) {
+            return nullptr;
         }
-        current = current->next;
+
+        MallocMetaData* block = (MallocMetaData*)p;
+        block->degree = MAX_DEG;
+        block->is_free = true;
+        block->next = block->prev = nullptr;
+        block->is_mmap = true;
+
+        _add_block_to_arr(block);
+
+        D = d;
+        while (D <= MAX_DEG && data_arr[D] == nullptr) {
+            D++;
+        }
+        if (D > MAX_DEG) return nullptr;
     }
-    void* value = sbrk(size + sizeof(MallocMetaData));
-    if(value == (void *) -1) return nullptr;
 
-    MallocMetaData* m = (MallocMetaData*) value;
-    m->size = size;
-    m->is_free = false;
-    m->next = nullptr;
-    m->prev = last;
-
-    if (!head) {
-        head = m;
-    } else {
-        last->next = m;
+    MallocMetaData* current = data_arr[D];
+    if (D == d) {
+        _remove_block_from_arr(current);
     }
-    last = m;
+    else {
+        while (D > d) {
+            splitBuddies(current);
+            D--;
+        }
+    }
 
-    return (char*)value + sizeof(MallocMetaData);
+    current->is_free = false;
+    return (void*)((char*)current + sizeof(MallocMetaData));
 }
-
 
 void* scalloc(size_t num, size_t size) {
 
@@ -174,60 +213,32 @@ void* scalloc(size_t num, size_t size) {
 
     if (num * size > 100000000) return nullptr;
 
-    MallocMetaData* current = head;
-    bool is_zero;
+    size_t total_size = num * size;
 
-    while(current != nullptr) {
+    void* ptr = smalloc(total_size);
+    if (!ptr) return nullptr;
 
-        if(current->is_free && current->size >= num * size) {
-            is_zero = true;
-            auto* data = (char*)current + sizeof(MallocMetaData);
+    memset(ptr, 0, total_size);
 
-            for(size_t i = 0; i < num * size; i++) {
-                if(data[i] != 0) {
-                    is_zero = false;
-                    break;
-                }
-            }
-
-            if(is_zero) {
-                current->is_free = false;
-                return data;
-            }
-        }
-
-        current = current->next;
-
-    }
-
-    void* value = sbrk(num * size + sizeof(MallocMetaData));
-    if(value == (void *) -1) return nullptr;
-
-    MallocMetaData* m = (MallocMetaData*) value;
-    m->size = num * size;
-    m->is_free = false;
-    m->next = nullptr;
-    m->prev = last;
-
-    if (!head) {
-        head = m;
-    } else {
-        last->next = m;
-    }
-    last = m;
-
-    auto* data = (char*)m + sizeof(MallocMetaData);
-    std::memset(data, 0, num * size);
-    return data;
+    return ptr;
 }
-
 
 void sfree(void* p) {
-    if (p == nullptr) return;
-    MallocMetaData* m = (MallocMetaData*) ((char*)p - sizeof(MallocMetaData));
-    m->is_free = true;
-}
+    if (!p) return;
 
+    MallocMetaData* block = (MallocMetaData*)((char*)p - sizeof(MallocMetaData));
+
+    if (block->is_free) return;
+
+    if (block->is_mmap) {
+        size_t block_size = _get_block_size(block->degree);
+        munmap((void*)block, block_size);
+        return;
+    }
+
+    block->is_free = true;
+    uniteFreeBuddies(block);
+}
 
 void* srealloc(void* oldp, size_t size) {
 
@@ -236,88 +247,46 @@ void* srealloc(void* oldp, size_t size) {
     if(!oldp) return nullptr;
 
     MallocMetaData* old_m = (MallocMetaData*) ((char*)oldp - sizeof(MallocMetaData));
-    if(size <= old_m->size) return oldp;
 
-    MallocMetaData* current = head;
-    auto* old_data = (char*)oldp;
+    size_t old_block_size = _get_block_size(old_m->degree);
+    size_t old_payload = old_block_size - sizeof(MallocMetaData);
+    if(size <= old_payload) return oldp;
 
-    while(current != nullptr) {
+    char* new_data = (char*)smalloc(size);
+    if(!new_data) return nullptr;
 
-        if(current->is_free && current->size >= size) {
+    std::memmove(new_data, oldp, std::min(old_payload, size));
 
-            current->is_free = false;
-
-            auto* data = (char*)current + sizeof(MallocMetaData);
-            size_t copy_size = (old_m->size < size) ? old_m->size : size;
-            std::memmove(data, old_data, copy_size);
-
-            old_m->is_free = true;
-
-            return data;
-        }
-
-        current = current->next;
-
-    }
-
-    void* value = sbrk(size + sizeof(MallocMetaData));
-    if(value == (void *) -1) return nullptr;
-
-    MallocMetaData* m = (MallocMetaData*) value;
-    m->size = size;
-    m->is_free = false;
-    m->next = nullptr;
-    m->prev = last;
-
-    if (!head) {
-        head = m;
-    } else {
-        last->next = m;
-    }
-    last = m;
-
-    auto* data = (char*)m + sizeof(MallocMetaData);
-    size_t copy_size = (old_m->size < size) ? old_m->size : size;
-    std::memmove(data, old_data, copy_size);
-    old_m->is_free = true;
-
-    return data;
+    sfree(oldp);
+    return new_data;
 
 }
-
 
 size_t _num_free_blocks() {
-
     size_t count = 0;
-    MallocMetaData* current = head;
-
-    while(current != nullptr) {
-        if(current->is_free) {
+    for(int i = 0; i <= MAX_DEG; i++) {
+        MallocMetaData* current = data_arr[i];
+        while(current) {
             count++;
+            current = current->next;
         }
-        current = current->next;
     }
-
     return count;
 }
-
 
 size_t _num_free_bytes() {
-
     size_t count = 0;
-    MallocMetaData* current = head;
-
-    while(current != nullptr) {
-        if(current->is_free) {
-            count += current->size;
+    for (int i = 0; i <= MAX_DEG; i++) {
+        MallocMetaData* curr = data_arr[i];
+        while (curr) {
+            count += _get_block_size(curr->degree) - sizeof(MallocMetaData);
+            curr = curr->next;
         }
-        current = current->next;
     }
-
     return count;
 }
 
-
+/*
 size_t _num_allocated_blocks() {
 
     size_t count = 0;
@@ -348,7 +317,7 @@ size_t _num_allocated_bytes() {
 size_t _num_meta_data_bytes() {
     return _num_allocated_blocks() * sizeof(MallocMetaData);
 }
-
+*/
 
 size_t _size_meta_data() {
     return sizeof(MallocMetaData);
