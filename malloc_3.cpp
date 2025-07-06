@@ -12,14 +12,13 @@
 struct MallocMetaData {
     unsigned int degree;
     int size;
-    bool is_free;
     MallocMetaData* next;
     MallocMetaData* prev;
     bool is_mmap;
+    bool is_free;
 };
 
 static MallocMetaData* data_arr[MAX_DEG + 1];
-static MallocMetaData* mmap_list;
 static bool is_init = false;
 static int active_blocks_num;
 static int bytes_allocated;
@@ -130,7 +129,6 @@ void splitBuddies(void* block) {
 void* allocateFirstTime() {
     active_blocks_num = 0;
     bytes_allocated = 0;
-    mmap_list = nullptr;
     char* ptr = (char*)sbrk(0);
     size_t max_block_size = _get_block_size(MAX_DEG);
     size_t remainder = (size_t)ptr % (MIN_BLOCK_NUM * max_block_size);
@@ -178,12 +176,6 @@ void* smalloc(size_t size) {
         current = (MallocMetaData*)p;
         current->is_mmap = true;
         current->next= current->prev = nullptr;
-        if(!mmap_list) mmap_list = current;
-        else {
-            current->next = mmap_list;
-            mmap_list->prev = current;
-            mmap_list = current;
-        }
     }else{
         int d = 0;
         while(_get_block_size(d) < size + sizeof(MallocMetaData)) {
@@ -240,20 +232,10 @@ void sfree(void* p) {
     if (block->is_free) return;
 
     if (block->is_mmap){
-        MallocMetaData* curr = mmap_list;
-        while (curr && curr != block){
-            curr = curr->next;
-        }
-        if(curr){
-            if(curr->prev)
-                curr->prev->next = curr->next;
-            else{
-                mmap_list = curr->next;
-            }
-            if(curr->next)
-                curr->next->prev = curr->prev;
-        }
+        active_blocks_num--;
+        bytes_allocated -= block->size;
         munmap((void*)block, block->size);
+        return;
     }
     else{
         block->is_free = true;
@@ -310,23 +292,11 @@ size_t _num_free_bytes() {
 }
 
 size_t _num_allocated_blocks() {
-    MallocMetaData* curr = mmap_list;
-    int i = 0;
-    while (curr){
-        i++;
-        curr = curr->next;
-    }
-    return active_blocks_num + i;
+    return active_blocks_num;
 }
 
 size_t _num_allocated_bytes() {
-    size_t mmap_size = 0;
-    MallocMetaData* curr = mmap_list;
-    while (curr){
-        mmap_size += curr->size;
-        curr = curr->next;
-    }
-    return bytes_allocated + mmap_size;
+    return bytes_allocated;
 }
 
 size_t _size_meta_data() {
