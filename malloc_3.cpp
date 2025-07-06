@@ -11,6 +11,7 @@
 
 struct MallocMetaData {
     unsigned int degree;
+    int size;
     bool is_free;
     MallocMetaData* next;
     MallocMetaData* prev;
@@ -19,6 +20,9 @@ struct MallocMetaData {
 
 static MallocMetaData* data_arr[MAX_DEG + 1];
 static bool is_init = false;
+static int active_blocks_num;
+static int bytes_allocated;
+
 
 size_t _get_block_size(unsigned int degree) {
     return MIN_BLOCK_SIZE << degree;  // 128 * 2^degree
@@ -123,6 +127,8 @@ void splitBuddies(void* block) {
 
 
 void* allocateFirstTime() {
+    active_blocks_num = 0;
+    bytes_allocated = 0;
     char* ptr = (char*)sbrk(0);
     size_t max_block_size = _get_block_size(MAX_DEG);
     size_t remainder = (size_t)ptr % (MIN_BLOCK_NUM * max_block_size);
@@ -184,11 +190,7 @@ void* smalloc(size_t size) {
 
         _add_block_to_arr(block);
 
-        D = d;
-        while (D <= MAX_DEG && data_arr[D] == nullptr) {
-            D++;
-        }
-        if (D > MAX_DEG) return nullptr;
+        D = MAX_DEG;
     }
 
     MallocMetaData* current = data_arr[D];
@@ -201,7 +203,9 @@ void* smalloc(size_t size) {
             D--;
         }
     }
-
+    active_blocks_num++;
+    bytes_allocated += size;
+    current->size = size;
     current->is_free = false;
     return (void*)((char*)current + sizeof(MallocMetaData));
 }
@@ -238,6 +242,8 @@ void sfree(void* p) {
     }
 
     block->is_free = true;
+    active_blocks_num--;
+    bytes_allocated -= block->size;
     uniteFreeBuddies(block);
 }
 
@@ -287,39 +293,22 @@ size_t _num_free_bytes() {
     return count;
 }
 
-/*
 size_t _num_allocated_blocks() {
 
-    size_t count = 0;
-    MallocMetaData* current = head;
-
-    while(current != nullptr) {
-        count++;
-        current = current->next;
-    }
-
-    return count;
+    return active_blocks_num;
 }
-
 
 size_t _num_allocated_bytes() {
-    size_t count = 0;
-    MallocMetaData* current = head;
-
-    while(current != nullptr) {
-        count += current->size;
-        current = current->next;
-    }
-
-    return count;
+    return bytes_allocated;
 }
-
-
-size_t _num_meta_data_bytes() {
-    return _num_allocated_blocks() * sizeof(MallocMetaData);
-}
-*/
 
 size_t _size_meta_data() {
     return sizeof(MallocMetaData);
 }
+
+size_t _num_meta_data_bytes() {
+    return _num_allocated_blocks() * _size_meta_data();
+}
+
+
+
