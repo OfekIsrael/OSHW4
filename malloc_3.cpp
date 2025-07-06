@@ -19,6 +19,7 @@ struct MallocMetaData {
 };
 
 static MallocMetaData* data_arr[MAX_DEG + 1];
+static MallocMetaData* mmap_list;
 static bool is_init = false;
 static int active_blocks_num;
 static int bytes_allocated;
@@ -129,6 +130,7 @@ void splitBuddies(void* block) {
 void* allocateFirstTime() {
     active_blocks_num = 0;
     bytes_allocated = 0;
+    mmap_list = nullptr;
     char* ptr = (char*)sbrk(0);
     size_t max_block_size = _get_block_size(MAX_DEG);
     size_t remainder = (size_t)ptr % (MIN_BLOCK_NUM * max_block_size);
@@ -162,19 +164,10 @@ void* smalloc(size_t size) {
         is_init = true;
     }
 
-    int d = 0;
-    while(_get_block_size(d) < size + sizeof(MallocMetaData)) {
-        d++;
-    }
-
-    int D = d;
-    while(D <= MAX_DEG && data_arr[D] == nullptr) {
-        D++;
-    }
-
-    if (D > MAX_DEG) {
+    MallocMetaData* current;
+    if (size >= _get_block_size(MAX_DEG)) {
         size_t block_size = _get_block_size(MAX_DEG);
-        void* p = mmap(nullptr, block_size,
+        void* p = mmap(nullptr, size + sizeof(MallocMetaData),
                        PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANONYMOUS,
                        -1, 0);
@@ -182,27 +175,38 @@ void* smalloc(size_t size) {
             return nullptr;
         }
 
-        MallocMetaData* block = (MallocMetaData*)p;
-        block->degree = MAX_DEG;
-        block->is_free = true;
-        block->next = block->prev = nullptr;
-        block->is_mmap = true;
+        current = (MallocMetaData*)p;
+        current->is_mmap = true;
+        current->next= current->prev = nullptr;
+        if(!mmap_list) mmap_list = current;
+        else {
+            current->next = mmap_list;
+            mmap_list->prev = current;
+            mmap_list = current;
+        }
+    }else{
+        int d = 0;
+        while(_get_block_size(d) < size + sizeof(MallocMetaData)) {
+            d++;
+        }
 
-        _add_block_to_arr(block);
-
-        D = MAX_DEG;
-    }
-
-    MallocMetaData* current = data_arr[D];
-    if (D == d) {
-        _remove_block_from_arr(current);
-    }
-    else {
-        while (D > d) {
-            splitBuddies(current);
-            D--;
+        int D = d;
+        while(D <= MAX_DEG && data_arr[D] == nullptr) {
+            D++;
+        }
+        if(D>MAX_DEG) return nullptr;
+        current = data_arr[D];
+        if (D == d) {
+            _remove_block_from_arr(current);
+        }
+        else {
+            while (D > d) {
+                splitBuddies(current);
+                D--;
+            }
         }
     }
+
     active_blocks_num++;
     bytes_allocated += size;
     current->size = size;
@@ -235,16 +239,28 @@ void sfree(void* p) {
 
     if (block->is_free) return;
 
-    if (block->is_mmap) {
-        size_t block_size = _get_block_size(block->degree);
-        munmap((void*)block, block_size);
-        return;
+    if (block->is_mmap){
+        MallocMetaData* curr = mmap_list;
+        while (curr && curr != block){
+            curr = curr->next;
+        }
+        if(curr){
+            if(curr->prev)
+                curr->prev->next = curr->next;
+            else{
+                mmap_list = curr->next;
+            }
+            if(curr->next)
+                curr->next->prev = curr->prev;
+        }
+        munmap((void*)block, block->size);
     }
-
-    block->is_free = true;
+    else{
+        block->is_free = true;
+        uniteFreeBuddies(block);
+    }
     active_blocks_num--;
     bytes_allocated -= block->size;
-    uniteFreeBuddies(block);
 }
 
 void* srealloc(void* oldp, size_t size) {
@@ -294,12 +310,23 @@ size_t _num_free_bytes() {
 }
 
 size_t _num_allocated_blocks() {
-
-    return active_blocks_num;
+    MallocMetaData* curr = mmap_list;
+    int i = 0;
+    while (curr){
+        i++;
+        curr = curr->next;
+    }
+    return active_blocks_num + i;
 }
 
 size_t _num_allocated_bytes() {
-    return bytes_allocated;
+    size_t mmap_size = 0;
+    MallocMetaData* curr = mmap_list;
+    while (curr){
+        mmap_size += curr->size;
+        curr = curr->next;
+    }
+    return bytes_allocated + mmap_size;
 }
 
 size_t _size_meta_data() {
