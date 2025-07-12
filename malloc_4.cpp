@@ -290,7 +290,6 @@ void* srealloc(void* oldp, size_t size) {
 
     sfree(oldp);
     return new_data;
-
 }
 
 size_t _num_free_blocks() {

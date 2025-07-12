@@ -245,27 +245,28 @@ void sfree(void* p) {
     bytes_allocated -= block->size;
 }
 
+
 void* srealloc(void* oldp, size_t size) {
 
     if(size == 0 || size > 100000000) return nullptr;
 
-    if(!oldp) return nullptr;
-
-    MallocMetaData* old_m = (MallocMetaData*) ((char*)oldp - sizeof(MallocMetaData));
-
-    size_t old_block_size = _get_block_size(old_m->degree);
-    size_t old_payload = old_block_size - sizeof(MallocMetaData);
-    if(size <= old_payload) return oldp;
-
+    size_t old_payload;
+    if(oldp){
+        MallocMetaData* old_m = (MallocMetaData*) ((char*)oldp - sizeof(MallocMetaData));
+        size_t old_block_size = _get_block_size(old_m->degree);
+        old_payload = old_block_size - sizeof(MallocMetaData);
+        if(size <= old_payload) return oldp;
+    }
     char* new_data = (char*)smalloc(size);
     if(!new_data) return nullptr;
 
-    std::memmove(new_data, oldp, std::min(old_payload, size));
+    if(oldp)
+        std::memmove(new_data, oldp, std::min(old_payload, size));
 
     sfree(oldp);
     return new_data;
-
 }
+
 
 size_t _num_free_blocks() {
     size_t count = 0;
@@ -292,11 +293,11 @@ size_t _num_free_bytes() {
 }
 
 size_t _num_allocated_blocks() {
-    return active_blocks_num;
+    return active_blocks_num + _num_free_blocks();
 }
 
 size_t _num_allocated_bytes() {
-    return bytes_allocated;
+    return bytes_allocated + _num_free_bytes();
 }
 
 size_t _size_meta_data() {
@@ -306,6 +307,7 @@ size_t _size_meta_data() {
 size_t _num_meta_data_bytes() {
     return _num_allocated_blocks() * _size_meta_data();
 }
+
 
 
 
