@@ -123,6 +123,7 @@ void splitBuddies(void* block) {
     buddy->prev = nullptr;
     buddy->is_mmap = current->is_mmap;
     _add_block_to_arr(buddy);
+    _add_block_to_arr(current);
 }
 
 
@@ -155,12 +156,13 @@ void* allocateFirstTime() {
 }
 
 void* smalloc(size_t size) {
-    if (size == 0 || size > 100000000) return nullptr;
 
     if(!is_init) {
         allocateFirstTime();
         is_init = true;
     }
+
+    if (size == 0 || size > 100000000) return nullptr;
 
     MallocMetaData* current;
     if (size >= _get_block_size(MAX_DEG)) {
@@ -171,7 +173,7 @@ void* smalloc(size_t size) {
         if (p == MAP_FAILED) {
             return nullptr;
         }
-
+        bytes_allocated += size;
         current = (MallocMetaData*)p;
         current->is_mmap = true;
         current->next= current->prev = nullptr;
@@ -187,19 +189,17 @@ void* smalloc(size_t size) {
         }
         if(D>MAX_DEG) return nullptr;
         current = data_arr[D];
-        if (D == d) {
-            _remove_block_from_arr(current);
-        }
-        else {
+        if (D != d) {
             while (D > d) {
                 splitBuddies(current);
                 D--;
             }
         }
+        _remove_block_from_arr(current);
+        bytes_allocated += _get_block_size(current->degree) - sizeof(MallocMetaData);
     }
 
     active_blocks_num++;
-    bytes_allocated += size;
     current->size = size;
     current->is_free = false;
     return (void*)((char*)current + sizeof(MallocMetaData));
@@ -227,6 +227,7 @@ void sfree(void* p) {
     if (!p) return;
 
     MallocMetaData* block = (MallocMetaData*)((char*)p - sizeof(MallocMetaData));
+    int old_deg = block->degree;
 
     if (block->is_free) return;
 
@@ -241,7 +242,7 @@ void sfree(void* p) {
         uniteFreeBuddies(block);
     }
     active_blocks_num--;
-    bytes_allocated -= block->size;
+    bytes_allocated -= _get_block_size(old_deg) - sizeof(MallocMetaData);
 }
 
 
