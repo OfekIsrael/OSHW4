@@ -52,50 +52,9 @@ void* scalloc(size_t num, size_t size) {
 
     if (num * size > 100000000) return nullptr;
 
-    MallocMataData* current = head;
-    bool is_zero;
-
-    while(current != nullptr) {
-
-        if(current->is_free && current->size >= num * size) {
-            is_zero = true;
-            auto* data = (char*)current + sizeof(MallocMataData);
-
-            for(size_t i = 0; i < num * size; i++) {
-                if(data[i] != 0) {
-                    is_zero = false;
-                    break;
-                }
-            }
-
-            if(is_zero) {
-                current->is_free = false;
-                return data;
-            }
-        }
-
-        current = current->next;
-
-    }
-
-    void* value = sbrk(num * size + sizeof(MallocMataData));
-    if(value == (void *) -1) return nullptr;
-
-    MallocMataData* m = (MallocMataData*) value;
-    m->size = num * size;
-    m->is_free = false;
-    m->next = nullptr;
-    m->prev = last;
-
-    if (!head) {
-        head = m;
-    } else {
-        last->next = m;
-    }
-    last = m;
-
-    auto* data = (char*)m + sizeof(MallocMataData);
-    std::memset(data, 0, num * size);
+    void* data = smalloc(size * num);
+    if(!data) return nullptr;
+    std::memset(data, 0, size * num);
     return data;
 }
 
@@ -111,7 +70,11 @@ void* srealloc(void* oldp, size_t size) {
 
     if(size == 0 || size > 100000000) return nullptr;
 
-    if(!oldp) return nullptr;
+    if(!oldp) {
+        char* new_data = (char*)smalloc(size);
+        if(!new_data) return nullptr;
+        return new_data;
+    }
 
     MallocMataData* old_m = (MallocMataData*) ((char*)oldp - sizeof(MallocMataData));
     if(size <= old_m->size) return oldp;
