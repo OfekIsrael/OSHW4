@@ -164,7 +164,6 @@ void* smalloc(size_t size) {
 
     MallocMetaData* current;
     if (size >= _get_block_size(MAX_DEG)) {
-        size_t block_size = _get_block_size(MAX_DEG);
         void* p = mmap(nullptr, size + sizeof(MallocMetaData),
                        PROT_READ | PROT_WRITE,
                        MAP_PRIVATE | MAP_ANONYMOUS,
