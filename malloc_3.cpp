@@ -110,7 +110,6 @@ bool _is_both_free(MallocMetaData* block) {
 
 void uniteFreeBuddies(MallocMetaData* block) {
 
-    if (block->degree == MAX_DEG) return;
     while (block->degree < MAX_DEG && _is_both_free(block)) {
         MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
         block = ((char*)block < (char*)buddy) ? block : buddy;
