@@ -18,6 +18,7 @@ struct MallocMetaData {
     bool is_free;
 };
 
+// saving in ascending order the free blocks.
 static MallocMetaData* data_arr[MAX_DEG + 1];
 static bool is_init = false;
 static int active_blocks_num;
@@ -35,10 +36,10 @@ void _remove_block_from_arr(MallocMetaData* block) {
     } else {
         data_arr[block->degree] = block->next;
     }
-
     if (block->next) {
         block->next->prev = block->prev;
     }
+    block->is_free = false;
     block->next = nullptr;
     block->prev = nullptr;
 }
@@ -58,7 +59,7 @@ void _add_block_to_arr(MallocMetaData* block) {
     MallocMetaData* temp = data_arr[block->degree];
 
     // Insert at beginning if needed
-    if (temp > block) {
+    if ((char*)temp > (char*)block) {
         block->next = temp;
         temp->prev = block;
         data_arr[block->degree] = block;
@@ -66,7 +67,7 @@ void _add_block_to_arr(MallocMetaData* block) {
     }
 
     // Find correct position
-    while (temp->next && temp->next < block) {
+    while (temp->next && (char*)temp->next < (char*)block) {
         temp = temp->next;
     }
 
@@ -78,6 +79,20 @@ void _add_block_to_arr(MallocMetaData* block) {
     block->prev = temp;
     temp->next = block;
 }
+
+bool _find_block(MallocMetaData* block) {
+    for (size_t i = 0; i <= MAX_DEG; ++i) {
+        MallocMetaData* current = data_arr[i];
+        while (current != nullptr) {
+            if (current == block) {
+                return true;
+            }
+            current = current->next;
+        }
+    }
+    return false;
+}
+
 
 void* _get_buddy(MallocMetaData* block) {
     char* blockAddr = (char*)block;
@@ -98,8 +113,9 @@ void uniteFreeBuddies(MallocMetaData* block) {
     if (block->degree == MAX_DEG) return;
     while (block->degree < MAX_DEG && _is_both_free(block)) {
         MallocMetaData* buddy = (MallocMetaData*)_get_buddy(block);
-        buddy->is_free = false;
+        block = ((char*)block < (char*)buddy) ? block : buddy;
         _remove_block_from_arr(buddy);
+        block->is_free = true;
         block->degree++;
     }
     _add_block_to_arr(block);
@@ -115,12 +131,8 @@ void splitBuddies(void* block) {
     MallocMetaData* current = (MallocMetaData*)block;
     _remove_block_from_arr(current);
     current->degree--;
-    size_t buddyBlockSize = _get_block_size(current->degree);
-    MallocMetaData* buddy = (MallocMetaData*) ((char*)block + buddyBlockSize);
-    buddy->is_free = true;
+    MallocMetaData* buddy = (MallocMetaData*)_get_buddy(current);
     buddy->degree = current->degree;
-    buddy->next = nullptr;
-    buddy->prev = nullptr;
     buddy->is_mmap = current->is_mmap;
     _add_block_to_arr(buddy);
     _add_block_to_arr(current);
@@ -142,15 +154,12 @@ void* allocateFirstTime() {
     }
     ptr += offset;
     MallocMetaData* current = (MallocMetaData*)ptr;
-    data_arr[MAX_DEG] = current;
     
     for (int i = 0; i < MIN_BLOCK_NUM; i++) {
         current->degree = MAX_DEG;
-        current->is_free = true;
-        current->prev = (i == 0) ? nullptr : (MallocMetaData*)((char*)current - max_block_size);
-        current->next = (i == MIN_BLOCK_NUM-1) ? nullptr : (MallocMetaData*)((char*)current + max_block_size);
+        _add_block_to_arr(current);
         current->is_mmap = false;
-        current = current->next;
+        current = (MallocMetaData*)((char*)current + max_block_size);
     }
     return ptr;
 }
